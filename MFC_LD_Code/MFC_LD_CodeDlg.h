@@ -70,7 +70,7 @@ public:
 	void ShowImage(cv::Mat Image, CWnd * pWnd);
 	void HoughLineDetection(cv::Mat src, cv::Mat & dst);
 	void PretendLine(cv::Mat src, cv::Mat & dst);
-	void LineCompensate(cv::Mat src, cv::Mat & dst, uint16_t thrshold);
+
 
 	void  Labeling(Mat src, CVector<objectInfo>& obj);
 
@@ -81,7 +81,6 @@ public:
 
 	std::string  GetColor(Mat src);
 
-	string LineClassify(cv::Mat src, cv::Point Center, double Area);
 
 	void ImgText(IplImage * img, std::string text, int x, int y);
 	

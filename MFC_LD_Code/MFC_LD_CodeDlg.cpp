@@ -127,10 +127,12 @@ UINT CMFC_LD_CodeDlg::threadFun(LPVOID LParam)
 	return 0;
 
 }
+//這裡用來調整聚地的閥值目前設定為150
 bool CMFC_LD_CodeDlg::predicate(cv::Point P1, cv::Point P2)
 {
 	return ((P1.x - P2.x)*(P1.x - P2.x) + (P1.y - P2.y)*(P1.y - P2.y)) <= 150;
 }
+//聚類
 int CMFC_LD_CodeDlg::partition(CVector<cv::Point>& _vec, CVector<int>& labels)
 {
 	int i, j, N = _vec.size();
@@ -282,6 +284,7 @@ void CMFC_LD_CodeDlg::FindLineMask(Mat src, Mat &dst, CVector <objectInfo> &obj)
 	Image_And_Range(Img_PretendLine,obj[i].Img_obj, obj[i].Img_obj,obj[i].XYmax, obj[i].XYmin);
 	
 }
+//用來將奇美的線與本程式的車道線做疊合(交集)
 void CMFC_LD_CodeDlg::Image_And_Range(cv::Mat src, Mat src2, cv::Mat &dst,Point MaxXY,Point MinXY)
 {
 	Mat temp;
@@ -459,52 +462,25 @@ void CMFC_LD_CodeDlg::PretendLine(cv::Mat src, cv::Mat &dst)
 	}
 	
 }
-void CMFC_LD_CodeDlg::LineCompensate(cv::Mat src, cv::Mat &dst, uint16_t thrshold)
-{
-	Mat Img_Mask;
-	src.copyTo(Img_Mask);
-	for (uint16_t j = 0; j < src.rows; j++)
-	{
-		Stack<cv::Point> Compensates;
-		for (uint16_t i = 0; i < src.cols; i++)
-		{
-			if (src.data[j*src.cols + i] > 0)
-				Compensates.push(cv::Point(i, j));
-		}
-		if (Compensates.size() >= 2)
-		{
-			int DataNum = Compensates.size();
-			cv::Point P = Compensates.pop();
-			for (uint16_t i = 0; i < DataNum-1; i++)
-			{
-				cv::Point P2= Compensates.pop();
-				if(abs(P2.x-P.x)< thrshold && abs(P2.x - P.x)>1)
-				line(Img_Mask, P, P2, Scalar(255), 2);
-				P = P2;
-			}
-		}
-	}
-	IplConvKernel *pKernel = NULL;
-	pKernel = cvCreateStructuringElementEx(3, 3, 1, 1, CV_SHAPE_RECT, NULL);
-	cvErode(&(IplImage)dst,&(IplImage)dst, pKernel, 1);
-	dst = Img_Mask;
 
-}
+//將車道線萃取出來
 void CMFC_LD_CodeDlg::Labeling(Mat src, CVector <objectInfo>& obj)
 {
 	
 	cv::Mat out = cv::Mat::zeros(src.size(), CV_8UC1);
 	CVector<cv::Point> pts; CVector<int> labels;
+	//將霍夫所有非0的點推出來
 	for (uint16_t i = 0; i<src.cols; i++)
 		for (size_t j = 0; j < src.rows; j++)
 		{
 			if (src.data[src.cols*j + i] != 0)
 				pts.push_back(cv::Point(i, j));
 		}
+	//將點進行聚類，n_labels為共分幾類，labels對應到pts每一個點的標號
 	int n_labels = partition(pts, labels);
 
 
-
+	//初始化物件(車道線)的容器
 	for (uint16_t i = 0; i < n_labels; i++)
 	{
 		objectInfo objectInitial;
@@ -515,6 +491,8 @@ void CMFC_LD_CodeDlg::Labeling(Mat src, CVector <objectInfo>& obj)
 		objectInitial.Img_obj= Mat::zeros(Size(src.cols, src.rows), CV_8UC1);
 		obj.push_back(objectInitial);
 	}
+
+	//將不同的label畫到對應的圖上，並且偵測點分布的極值減少後面運算
 	for (uint16_t i = 0; i < pts.size(); i++)
 	{
 		obj[labels[i]].Img_obj.data[pts[i].y* src.cols + pts[i].x] = 255;
@@ -530,6 +508,7 @@ void CMFC_LD_CodeDlg::Labeling(Mat src, CVector <objectInfo>& obj)
 			obj[labels[i]].XYmin.y = pts[i].y;
 	}
 
+	//將相同label的線填補為實心
 	for (uint16_t k = 0; k < n_labels; k++)
 	{
 		for (uint16_t j = obj[k].XYmin.y; j < obj[k].XYmax.y; j++)
@@ -563,6 +542,8 @@ void CMFC_LD_CodeDlg::Labeling(Mat src, CVector <objectInfo>& obj)
 	//}
 
 }
+
+//用來計算形心和面積
 Point CMFC_LD_CodeDlg::GetCenterAndArea(Mat src,int &Area, Point Max, Point Min)
 {
 	Point corner;
@@ -584,6 +565,7 @@ Point CMFC_LD_CodeDlg::GetCenterAndArea(Mat src,int &Area, Point Max, Point Min)
 	Area = sum;
 	return corner;
 }
+//用來將車道線的遮照對ROI拿取原本車道線的顏色
 void CMFC_LD_CodeDlg::FillMaskColor(cv::Mat Img_Mask, Mat Img_ROI, cv::Mat &dst)
 {
 	Mat temp = Mat::zeros(cv::Size(Img_Mask.size()), Img_Mask.type());
@@ -675,40 +657,7 @@ std::string  CMFC_LD_CodeDlg::GetColor(Mat src)
         return "Yellow";
 
 }
-string CMFC_LD_CodeDlg::LineClassify(cv::Mat src, cv::Point Center, double Area)
-{
-	int LineWidth[2] = { 0 };
 
-	for (uint16_t i = 1; i < src.cols; i++)
-	{
-		if (src.at<uchar>(Center.y, i) > 0 && src.at<uchar>(Center.y, i - 1) == 0)//左往右掃→
-			LineWidth[0] = i;
-		if (src.at<uchar>(Center.y, src.cols - i) > 0 && src.at<uchar>(Center.y, src.cols - i + 1) == 0)//右往左掃←
-			LineWidth[1] = src.cols - i - 1;
-	}
-	double Length = Area / (abs(LineWidth[1] - LineWidth[0]));
-	if (abs(LineWidth[1] - LineWidth[0]) > 15 && abs(LineWidth[1] - LineWidth[0]) < 48)//單線
-	{
-		if (Length > 35 && Length < 120)//虛線
-		{
-			return "dotted line";
-		}
-		else if (Length > 130 && Length < 180)//實線
-		{
-
-			return "Solid line";
-		}
-		else
-			return "false";
-	}
-	else if (abs(LineWidth[1] - LineWidth[0]) >= 48 && abs(LineWidth[1] - LineWidth[0])<80 && Length > 130 && Length < 180)//雙線
-	{
-		return "double Line";
-	}
-	else
-		return "false";
-
-}
 void CMFC_LD_CodeDlg::ImgText(IplImage* img, std::string text, int x, int y)
 {
 	CvFont font;
