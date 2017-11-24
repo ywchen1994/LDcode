@@ -60,24 +60,23 @@ public:
 	CthreadParam m_threadPara;
 	CWinThread*  m_lpThread;
 	static UINT threadFun(LPVOID LParam);
-	bool predicate(cv::Point P1, cv::Point P2);
-	int partition(CVector<cv::Point>& _vec, CVector<int>& labels);
+
 	void Thread_CapFromFile(LPVOID lParam);
 	void FindLineMask(Mat src, Mat & dst, CVector<objectInfo>& obj);
 	
 	void Image_And_Range(cv::Mat src, Mat src2, cv::Mat & dst, Point MaxXY, Point MinXY);
+	string LineClassify(cv::Mat src, cv::Point Center, double Area);
 	bool NightMode(cv::Mat img);
 	void ShowImage(cv::Mat Image, CWnd * pWnd);
 	void HoughLineDetection(cv::Mat src, cv::Mat & dst);
 	void PretendLine(cv::Mat src, cv::Mat & dst);
 
-
-	void  Labeling(Mat src, CVector<objectInfo>& obj);
-
 	Point GetCenterAndArea(Mat src, int & Area, Point Max, Point Min);
 
 
 	void FillMaskColor(cv::Mat src, Mat src2, cv::Mat & dst);
+
+	void FillMaskColor(cv::Mat Img_Mask, Mat Img_ROI, cv::Mat & dst, Point XYmax, Point XYmin);
 
 	std::string  GetColor(Mat src);
 

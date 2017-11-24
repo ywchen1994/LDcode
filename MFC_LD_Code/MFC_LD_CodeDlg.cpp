@@ -127,93 +127,93 @@ UINT CMFC_LD_CodeDlg::threadFun(LPVOID LParam)
 	return 0;
 
 }
-//這裡用來調整聚地的閥值目前設定為150
-bool CMFC_LD_CodeDlg::predicate(cv::Point P1, cv::Point P2)
+
+bool checkObj(Mat _img, int y, int x, int valueCheck)
 {
-	return ((P1.x - P2.x)*(P1.x - P2.x) + (P1.y - P2.y)*(P1.y - P2.y)) <= 150;
+	if (y >= 0 && x >= 0 && y < _img.rows&&x < _img.cols)
+		if (_img.data[(y)*_img.cols + (x)] == valueCheck)
+			return true;
+
+	return false;
 }
-//聚類
-int CMFC_LD_CodeDlg::partition(CVector<cv::Point>& _vec, CVector<int>& labels)
+bool setToNumber_close(Mat img, int i, int j, Mat& _img, int count)
 {
-	int i, j, N = _vec.size();
-	const cv::Point* vec = &_vec[0];
+	//確認有沒有設任何東西，因為有的話就要再做一次
+	bool haveSet = false;
+	int boxSizeH = 30;
+	int boxSizeW = 5;
+	if (_img.data[(j)*_img.cols + (i)] == 0 && img.data[(j)*img.cols + (i)] == 255)//如果自己是[未分類]
+																				   //若四周有東西就把自己變成count
+		for (int n = -boxSizeH; n <= boxSizeH; n++)
+			for (int m = -boxSizeW; m <= boxSizeW; m++)
+				if (checkObj(_img, j + m, i + n, count))
+				{
+					_img.data[(j)*_img.cols + (i)] = count;
+					haveSet = true;
+					break;
+				}
 
-	const int PARENT = 0;
-	const int RANK = 1;
+	return haveSet;
+}
+int Labeling(Mat img, Mat &_img)
+{
+	/*
+	*  [非物件]  img→0
+	*  [已分類]  _img→1~254
+	*  [未分類]  img→255 _img→0
+	*/
 
-	CVector<int> _nodes(N * 2);
-	int(*nodes)[2] = (int(*)[2])&_nodes[0];
-
-	for (i = 0; i < N; i++)
+	//偷偷的給他一個黑框
+	for (int j = 0; j < img.rows; j++)
 	{
-		nodes[i][PARENT] = -1;
-		nodes[i][RANK] = 0;
+		img.data[(j)*img.cols + (0)] = 0;
+		img.data[(j)*img.cols + (img.cols - 1)] = 0;
 	}
-	for (i = 0; i < N; i++)
+
+	for (int i = 0; i < img.cols; i++)
 	{
-		int root = i;
+		img.data[(0)*img.cols + (i)] = 0;
+		img.data[(img.rows - 1)*img.cols + (i)] = 0;
+	}
 
-		// find root
-		while (nodes[root][PARENT] >= 0)
-			root = nodes[root][PARENT];
-
-		for (j = 0; j < N; j++)
-		{
-			if (i == j || !predicate(vec[i], vec[j]))
-				continue;
-			int root2 = j;
-
-			while (nodes[root2][PARENT] >= 0)
-				root2 = nodes[root2][PARENT];
-
-			if (root2 != root)
+	int count = 10;//@在這裡設定剛開始區域設定的值
+	_img = Mat::zeros(Size(img.cols, img.rows), CV_8UC1);
+	bool keepFind = true;
+	while (keepFind)
+	{
+		//先找種子
+		bool find = false;//求有沒有找到
+		for (int j = 1; j < img.rows && find == false; j++)
+			for (int i = 1; i < img.cols&& find == false; i++)
 			{
-				// unite both trees
-				int rank = nodes[root][RANK], rank2 = nodes[root2][RANK];
-				if (rank > rank2)
-					nodes[root2][PARENT] = root;
-				else
+				if (img.data[(j)*img.cols + (i)] == 255 && _img.data[(j)*_img.cols + (i)] == 0)//如果自己是[未分類]
 				{
-					nodes[root][PARENT] = root2;
-					nodes[root2][RANK] += rank == rank2;
-					root = root2;
-				}
-				assert(nodes[root][PARENT] < 0);
-
-				int k = j, parent;
-
-				// compress the path from node2 to root
-				while ((parent = nodes[k][PARENT]) >= 0)
-				{
-					nodes[k][PARENT] = root;
-					k = parent;
-				}
-
-				// compress the path from node to root
-				k = i;
-				while ((parent = nodes[k][PARENT]) >= 0)
-				{
-					nodes[k][PARENT] = root;
-					k = parent;
+					//先設定自己是[已分類]
+					_img.data[(j)*_img.cols + (i)] = count;
+					//跳出
+					find = true;
 				}
 			}
+
+		//再來做擴散
+		if (find == true)//如果有找到則擴散
+		{
+			for (int j = 0; j < img.rows; j++)
+				for (int i = 0; i < img.cols; i++)
+					setToNumber_close(img, i, j, _img, count);
+
+			//結束後為了下一個編號做準備
+			count = count + 10;//@在這裡設定每個區域數值差多少
+		}
+		else//如果沒找到，那就代表全部都分類完了
+		{
+			//就結束搜尋
+			keepFind = false;
 		}
 	}
-	for (uint16_t i = 0; i<N; i++)
-		labels.push_back(0);
-	int nclasses = 0;
-
-	for (i = 0; i < N; i++)
-	{
-		int root = i;
-		while (nodes[root][PARENT] >= 0)
-			root = nodes[root][PARENT];
-		if (nodes[root][RANK] >= 0)
-			nodes[root][RANK] = ~nclasses++;
-		labels[i] = ~nodes[root][RANK];
-	}
-	return nclasses;
+	return (count / 10) - 1;
 }
+
 void CMFC_LD_CodeDlg::Thread_CapFromFile(LPVOID lParam)
 {
 	CthreadParam * Thread_Info = (CthreadParam *)lParam;
@@ -249,7 +249,7 @@ void CMFC_LD_CodeDlg::Thread_CapFromFile(LPVOID lParam)
 				if (LineType != "false")
 				{
 					cvtColor(obj[i].Img_obj, Img_ColorMask, CV_GRAY2BGR);
-					FillMaskColor(Img_ColorMask, Img_ROI, Img_ColorMask);
+					FillMaskColor(Img_ColorMask,Img_ROI,Img_ColorMask, obj[i].XYmax, obj[i].XYmin);
 					LineColor = GetColor(Img_ColorMask);
 				}
 				if (LineColor != "false" && LineType != "false")
@@ -278,12 +278,67 @@ void CMFC_LD_CodeDlg::FindLineMask(Mat src, Mat &dst, CVector <objectInfo> &obj)
 	Mat Img_Line, Img_PretendLine;
 	PretendLine(edges, Img_PretendLine);
 	HoughLineDetection(edges, Img_Line);
+	Mat Img_Label;
+	int Objcounter = Labeling(Img_Line, Img_Label);
+
+	for (uint16_t i = 0; i < Objcounter; i++)
+	{
+		objectInfo objectInitial;
+		objectInitial.center = { 0 };
+		objectInitial.Area = 0;
+		objectInitial.XYmax = { 0 };
+		objectInitial.XYmin = { max(Img_Line.cols,Img_Line.rows),max(Img_Line.cols,Img_Line.rows) };
+		objectInitial.Img_obj = Mat::zeros(Img_Line.size(), Img_Line.type());
+		obj.push_back(objectInitial);
+	}
 	
-	Labeling(Img_Line,obj);
-	for(uint16_t i=0;i<obj.size();i++)
-	Image_And_Range(Img_PretendLine,obj[i].Img_obj, obj[i].Img_obj,obj[i].XYmax, obj[i].XYmin);
-	
+	for(uint16_t i=0;i<Img_Line.cols;i++)
+		for (uint16_t j = 0; j < Img_Line.rows; j++)
+		{
+			for (uint16_t k = 0; k < Objcounter; k++)
+			{
+				if (Img_Label.data[j*Img_Label.cols + i] == (10 * k + 10))
+				{
+					obj[k].Img_obj.data[j*Img_Label.cols + i] = 255;
+					if (obj[k].XYmax.x < i)obj[k].XYmax.x = i;
+					if (obj[k].XYmax.y < j)obj[k].XYmax.y = j;
+					if (obj[k].XYmin.x > i)obj[k].XYmin.x = i;
+					if (obj[k].XYmin.y > j)obj[k].XYmin.y = j;
+				}
+			}
+		}
+
+	for(uint16_t k=0;k<Objcounter;k++)
+		for (size_t j = obj[k].XYmin.y; j <= obj[k].XYmax.y; j++)
+		{
+			Stack<cv::Point> Compensates;
+			for (size_t i = obj[k].XYmin.x; i <= obj[k].XYmax.x; i++)
+				if (obj[k].Img_obj.data[j*obj[k].Img_obj.cols + i] > 0)
+					Compensates.push(Point(i, j));
+			if (Compensates.size() >= 2)
+			{
+				int DataNum = Compensates.size();
+				cv::Point P = Compensates.pop();
+				for (uint16_t i = 0; i < DataNum - 1; i++)
+				{
+					cv::Point P2 = Compensates.pop();
+					if (abs(P2.x - P.x) < 35 && abs(P2.x - P.x) > 1)
+						line(obj[k].Img_obj, P, P2, Scalar(255), 2);
+					P = P2;
+				}
+			}
+		}
+  
+	for (uint16_t i = 0; i < obj.size(); i++)
+	{
+		obj[i].center = GetCenterAndArea(obj[i].Img_obj, obj[i].Area, obj[i].XYmax, obj[i].XYmin);
+		Image_And_Range(Img_PretendLine, obj[i].Img_obj, obj[i].Img_obj, obj[i].XYmax, obj[i].XYmin);
+	}
+		
+
 }
+
+
 //用來將奇美的線與本程式的車道線做疊合(交集)
 void CMFC_LD_CodeDlg::Image_And_Range(cv::Mat src, Mat src2, cv::Mat &dst,Point MaxXY,Point MinXY)
 {
@@ -314,6 +369,40 @@ void CMFC_LD_CodeDlg::Image_And_Range(cv::Mat src, Mat src2, cv::Mat &dst,Point 
 			
 	}
 	temp.copyTo(dst);
+}
+string CMFC_LD_CodeDlg::LineClassify(cv::Mat src, cv::Point Center, double Area)
+{
+	int LineWidth[2] = { 0 };
+
+	for (uint16_t i = 1; i < src.cols; i++)
+	{
+		if (src.at<uchar>(Center.y, i) > 0 && src.at<uchar>(Center.y, i - 1) == 0)//左往右掃→
+			LineWidth[0] = i;
+		if (src.at<uchar>(Center.y, src.cols - i) > 0 && src.at<uchar>(Center.y, src.cols - i + 1) == 0)//右往左掃←
+			LineWidth[1] = src.cols - i - 1;
+	}
+	double Length = Area / (abs(LineWidth[1] - LineWidth[0]));
+	if (abs(LineWidth[1] - LineWidth[0]) > 15 && abs(LineWidth[1] - LineWidth[0]) < 48)//單線
+	{
+		if (Length > 35 && Length < 120)//虛線
+		{
+			return "dotted line";
+		}
+		else if (Length > 130 && Length < 180)//實線
+		{
+
+			return "Solid line";
+		}
+		else
+			return "false";
+	}
+	else if (abs(LineWidth[1] - LineWidth[0]) >= 48 && abs(LineWidth[1] - LineWidth[0])<80 && Length > 130 && Length < 180)//雙線
+	{
+		return "double Line";
+	}
+	else
+		return "false";
+
 }
 bool CMFC_LD_CodeDlg::NightMode(cv::Mat img)
 {
@@ -463,85 +552,7 @@ void CMFC_LD_CodeDlg::PretendLine(cv::Mat src, cv::Mat &dst)
 	
 }
 
-//將車道線萃取出來
-void CMFC_LD_CodeDlg::Labeling(Mat src, CVector <objectInfo>& obj)
-{
-	
-	cv::Mat out = cv::Mat::zeros(src.size(), CV_8UC1);
-	CVector<cv::Point> pts; CVector<int> labels;
-	//將霍夫所有非0的點推出來
-	for (uint16_t i = 0; i<src.cols; i++)
-		for (size_t j = 0; j < src.rows; j++)
-		{
-			if (src.data[src.cols*j + i] != 0)
-				pts.push_back(cv::Point(i, j));
-		}
-	//將點進行聚類，n_labels為共分幾類，labels對應到pts每一個點的標號
-	int n_labels = partition(pts, labels);
 
-
-	//初始化物件(車道線)的容器
-	for (uint16_t i = 0; i < n_labels; i++)
-	{
-		objectInfo objectInitial;
-		objectInitial.Area = 0;
-		objectInitial.center = {0};
-		objectInitial.XYmax = Point(0,0);
-		objectInitial.XYmin = Point(max(src.cols, src.rows), max(src.cols, src.rows));
-		objectInitial.Img_obj= Mat::zeros(Size(src.cols, src.rows), CV_8UC1);
-		obj.push_back(objectInitial);
-	}
-
-	//將不同的label畫到對應的圖上，並且偵測點分布的極值減少後面運算
-	for (uint16_t i = 0; i < pts.size(); i++)
-	{
-		obj[labels[i]].Img_obj.data[pts[i].y* src.cols + pts[i].x] = 255;
-		
-		if (pts[i].x > obj[labels[i]].XYmax.x)
-			obj[labels[i]].XYmax.x = pts[i].x;
-		if (pts[i].y > obj[labels[i]].XYmax.y)
-			obj[labels[i]].XYmax.y = pts[i].y;
-
-		if (pts[i].x < obj[labels[i]].XYmin.x)
-			obj[labels[i]].XYmin.x = pts[i].x;
-		if (pts[i].y< obj[labels[i]].XYmin.y)
-			obj[labels[i]].XYmin.y = pts[i].y;
-	}
-
-	//將相同label的線填補為實心
-	for (uint16_t k = 0; k < n_labels; k++)
-	{
-		for (uint16_t j = obj[k].XYmin.y; j < obj[k].XYmax.y; j++)
-		{
-			Stack<cv::Point> Compensates;
-			for (uint16_t i = obj[k].XYmin.x; i < obj[k].XYmax.x; i++)
-				if (obj[k].Img_obj.data[j*src.cols + i] > 0)
-					Compensates.push(cv::Point(i, j));
-
-			if (Compensates.size() >= 2)
-			{
-				int DataNum = Compensates.size();
-				cv::Point P = Compensates.pop();
-				for (uint16_t i = 0; i < DataNum - 1; i++)
-				{
-					cv::Point P2 = Compensates.pop();
-					if (abs(P2.x - P.x) < 35 && abs(P2.x - P.x) > 1)
-						line(obj[k].Img_obj, P, P2, Scalar(255), 2);
-					P = P2;
-				}
-			}
-		}
-		obj[k].center=GetCenterAndArea(obj[k].Img_obj, obj[k].Area, obj[k].XYmax, obj[k].XYmin);
-	}
-	//for (uint16_t i = 0; i < n_labels; i++) //Debug用
-	//{
-	//	cv::Point max = obj[i].XYmax;
-	//	cv::Point min = obj[i].XYmin;
-	//	Mat temp_test = obj[i].Img_obj;
-	//	
-	//}
-
-}
 
 //用來計算形心和面積
 Point CMFC_LD_CodeDlg::GetCenterAndArea(Mat src,int &Area, Point Max, Point Min)
@@ -559,22 +570,24 @@ Point CMFC_LD_CodeDlg::GetCenterAndArea(Mat src,int &Area, Point Max, Point Min)
 			}
 
 	if (sum == 0) { corner.x = 0; corner.y = 0; }
-
-	corner.x = x0 / sum;
-	corner.y = y0 / sum;
+	else
+	{
+		corner.x = x0 / sum;
+		corner.y = y0 / sum;
+	}
 	Area = sum;
 	return corner;
 }
 //用來將車道線的遮照對ROI拿取原本車道線的顏色
-void CMFC_LD_CodeDlg::FillMaskColor(cv::Mat Img_Mask, Mat Img_ROI, cv::Mat &dst)
+void CMFC_LD_CodeDlg::FillMaskColor(cv::Mat Img_Mask, Mat Img_ROI, cv::Mat &dst,Point XYmax,Point XYmin)
 {
 	Mat temp = Mat::zeros(cv::Size(Img_Mask.size()), Img_Mask.type());
-	for (uint16_t j = 0; j < Img_Mask.rows; j++)
+	for (uint16_t j = XYmin.y; j < XYmax.y; j++)
 	{
 		uchar* Uchar_ROI = Img_ROI.ptr<uchar>(j);
 		uchar* Uchar_temp = temp.ptr<uchar>(j);
 		uchar* Uchar_Mask= Img_Mask.ptr<uchar>(j);
-		for (uint16_t i = 0; i < Img_Mask.cols; i++)
+		for (uint16_t i = XYmin.x; i < XYmax.x; i++)
 		{
 		  if(Uchar_Mask[i * 3]>0)
 			for (uint16_t k = 0; k<3; k++)
